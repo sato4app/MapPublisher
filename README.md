@@ -1,16 +1,17 @@
-# ClosureEditor
+# MapPublisher
 
-### 通行止め・通行困難地点の管理
+### 地図データの公開
 
-- 緊急ポイント・ハイキングルートのgeojsonファイルを読み込み、地理院地図上にハイキングマップとして表示する。
-- ハイキングマップにおける、通行止め・通行困難地点（以下 closures）の位置指定を行う。
-- 登録した地点は、標高を取得する。
-- 登録した地点は、geojsonファイルにて出力可能とする。
-- 通行止め・通行困難地点は、ユーザーに対して別アプリ(minoh-hiking)にて公開する。
+- MapEditor が出力した geojson ファイルを読み込み、地理院地図上に表示して内容を確認する。
+- 確認した内容を**公開スキーマへ整形**し、公開API へ送信してユーザーに公開する。
+- 公開するのは次の2つのデータセット。
+  - **地図データ** … 緊急ポイント（ポイントGPS）・ハイキングルート・スポット
+  - **通行止め・通行困難地点** … closures
 
-これまで MapEditor（位置指定）と minoh-hiking（公開）に分かれていた機能を、
-**位置指定から公開まで**を1つのアプリで完結させるかたちに集約したもの。
-集約の経緯は [docs/funcspec-202607.md §1.3](docs/funcspec-202607.md) を参照。
+**本アプリは編集を行わない。** 地点・ルート・スポットの編集、通行止め地点の登録は
+MapEditor の役割であり、本アプリは「読み込む → 確認する → 公開する」に絞っている。
+
+再構成の経緯と全体計画は [docs/migration-plan-202608.md](docs/migration-plan-202608.md) を参照。
 
 ## 位置づけ
 
@@ -20,7 +21,18 @@
 | 対応端末 | PC専用 |
 | 言語 | 日本語のみ |
 | オフライン・PWA | 非対応 |
-| ホスティング | GitHub Pages（`sato4app/ClosureEditor`） |
+| ホスティング | GitHub Pages（`sato4app/MapPublisher`） |
+
+## 役割分担
+
+| リポジトリ | 役割 |
+|---|---|
+| MapEditor | 地点・ルート・スポットの編集、通行止め地点の登録。**作業用** geojson を出力する |
+| **MapPublisher** | 作業用 geojson を**公開スキーマへ整形**し、公開API へ送信する |
+| minoh-hiking | 公開API の実装・配信元、および利用者向け表示アプリ |
+
+編集用の識別子（`spot` の `id` など）は MapEditor の作業ファイルには残し、
+**MapPublisher が公開時に落とす**。編集の都合と配信の都合を分離している。
 
 ## 開発・動作確認
 
@@ -38,17 +50,17 @@ npx serve .
 ## ファイル構成
 
 ```
-index.html          画面（1画面のみ・右上に操作パネル）
+index.html          画面（1画面・右上に操作パネル・2セクション構成）
 styles.css          スタイル
 js/
   app.js            エントリーポイント。初期化とイベント登録
-  constants.js      定数（地図・マーカースタイル・公開API URL・版日付）
+  constants.js      定数（地図・マーカースタイル・公開API URL・公開対象 type）
   mapCore.js        地図の初期化・レイヤーの重ね順
-  closureEditor.js  登録地点の状態管理・マーカー描画・追加/移動/削除・属性編集・標高付与
-  fileIO.js         geojson の読み込み・出力
-  publish.js        公開（POST・E01〜E05・バックアップ保存）
-  basemap.js        背景（ハイキングマップ）の表示
-  elevation.js      国土地理院標高API
+  render.js         マーカー描画（2データセット共通）
+  mapData.js        地図データの保持・表示・公開用整形
+  closureData.js    通行止め地点の保持・表示・公開用整形
+  fileIO.js         geojson の読み込み（置換方式）・整形結果の出力
+  publish.js        公開（POST・件数差分の確認・E01〜E06・バックアップ保存）
   message.js        トーストメッセージ
   utils.js          日付・座標の丸め・ファイル保存
 docs/               仕様書一式
@@ -58,31 +70,39 @@ docs/               仕様書一式
 
 | 文書 | 内容 |
 |------|------|
-| [funcspec-202607.md](docs/funcspec-202607.md) | 機能仕様（本アプリの正本）。公開API の契約項目・セキュリティ上の考慮を含む |
-| [dataspec-202607.md](docs/dataspec-202607.md) | GeoJSON データ仕様（正本） |
-| [usersGuide-202607.md](docs/usersGuide-202607.md) | 利用者の手引（運用担当者向けの操作手順・エラー対応・トークン設定） |
-
-この3文書で完結する。移行検討結果・minoh-hiking 側の設計書・テスト計画は
-minoh-hiking リポジトリ側の文書であり、本リポジトリには置かない。
+| [migration-plan-202608.md](docs/migration-plan-202608.md) | 再構成・移行の実装計画（3リポジトリ横断） |
+| [funcspec-202608.md](docs/funcspec-202608.md) | 機能仕様（本アプリの正本） |
+| [dataspec-202608.md](docs/dataspec-202608.md) | 入力 GeoJSON の仕様と公開スキーマへの整形規則 |
+| [usersGuide-202608.md](docs/usersGuide-202608.md) | 利用者の手引（運用担当者向けの操作手順・エラー対応・トークン設定） |
 
 ## 公開API について
 
-公開先は minoh-hiking の `POST /api/closures`（別オリジン・CORS 許可済み）。
+公開先は minoh-hiking（別オリジン・CORS 許可済み）。
 
-**公開API の仕様は minoh-hiking 設計書 §5（契約バージョン 1.0）が正本であり、
-本リポジトリには書き写さない。** 座標範囲・`id` 一意・`version` 必須といった検証は
-サーバーに任せ、失敗時は API が返した日本語メッセージをそのまま表示する
-（二重管理を避けるため）。依存している契約項目のみ
-[機能仕様 §6](docs/funcspec-202607.md) に列挙する。
+| メソッド | パス | 用途 |
+|---|---|---|
+| GET | `/api/manifest` | 各データセットの version・件数（起動時の表示に使用） |
+| POST | `/api/mapdata` | 地図データの公開（全置換） |
+| POST | `/api/closures` | 通行止め地点の公開（全置換） |
+
+**公開API の仕様は minoh-hiking
+[`docs/publish-api-202608.md`](../../ナビアプリ/minoh-hiking/docs/publish-api-202608.md)
+（契約バージョン 2.0）が正本であり、本リポジトリには書き写さない。**
+
+座標範囲・`id` 一意・`type` の妥当性といった検証はサーバーに任せ、失敗時は API が返した
+日本語メッセージをそのまま表示する（二重管理を避けるため）。
+`version` も同じ理由でクライアント側では扱わない。**採番はサーバーの責務**であり、
+予測値を出すと採番ロジックを二重に持つことになる。
 
 ## 移行の進捗
 
-- [x] 段階0: 仕様確定（機能仕様・データ仕様・利用者の手引の作成）
-- [x] 段階1: ClosureEditor 作成
-- [ ] 段階2: ClosureEditor で実際に1回公開し、minoh-hiking の表示で確認
-- [ ] 段階3: MapGPS のカード差し替え（運用手順は利用者の手引へ移管済み）
-- [ ] 段階4: MapEditor から closures 機能を削除
-- [ ] 段階5: minoh-hiking を表示専用化
-- [ ] 段階6: minoh-hiking 一般公開
+- [x] 段階0: 仕様確定（公開API 契約2.0・公開スキーマの策定）
+- [x] 段階1: MapPublisher の再構成（編集機能の削除・2データセット公開への対応）
+- [ ] 段階2: minoh-hiking に公開API を実装（`_lib` 共通化・`mapdata`・`manifest`・`closures` 改修）
+- [ ] 段階3: 地図データの初回公開
+- [ ] 段階4: minoh-hiking アプリ側の切替（version による更新判定・キャッシュ）
+- [ ] 段階5: 後始末（バンドル geojson 削除・旧環境変数削除・ドキュメント改訂）
 
-段階2を通過するまで、MapEditor・minoh-hiking の既存経路はそのまま残す。
+段階2が完了するまで、`/api/mapdata` と `/api/manifest` は存在しないため、
+地図データの「現在公開中」は「取得できません」と表示され、公開は E06 になる。
+通行止め地点は既存の `/api/closures`（契約1.0）に対して動作する。
