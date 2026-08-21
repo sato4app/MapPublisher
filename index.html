@@ -21,8 +21,24 @@
             <span class="panel-version" id="appVersion"></span>
         </div>
 
+        <!-- 公開するデータセットの切り替え。選んだものだけを表示する -->
+        <div class="dataset-selector">
+            <label>
+                <input type="radio" name="dataset" value="mapdata" checked>
+                <span class="selected">ハイキングマップデータ</span>
+            </label>
+            <label>
+                <input type="radio" name="dataset" value="closures">
+                <span>通行止め・通行困難地点</span>
+            </label>
+            <label>
+                <input type="radio" name="dataset" value="tiles">
+                <span>地図タイルのダウンロード領域</span>
+            </label>
+        </div>
+
         <!-- ハイキングマップデータ（ポイント・ルート・スポット） -->
-        <section class="panel-section">
+        <section class="panel-section" data-panel="mapdata">
             <div class="section-title">ハイキングマップデータ</div>
 
             <div class="row">
@@ -53,7 +69,7 @@
         </section>
 
         <!-- 通行止め・通行困難地点 -->
-        <section class="panel-section">
+        <section class="panel-section" data-panel="closures" hidden>
             <div class="section-title">通行止め・通行困難地点</div>
 
             <div class="row">
@@ -80,6 +96,30 @@
             <div class="row button-row">
                 <button class="action-btn publish-btn" id="publishClosureBtn">公開</button>
                 <button id="exportClosureBtn">整形結果を出力</button>
+            </div>
+        </section>
+
+        <!-- 地図タイルのダウンロード領域（DownloadArea が出力した tile_manifest.json）
+             タイル一覧は地点でもルートでもないため「地図に表示」は持たない -->
+        <section class="panel-section" data-panel="tiles" hidden>
+            <div class="section-title">地図タイルのダウンロード領域</div>
+
+            <div class="row">
+                <label for="tileFileInput" class="file-input-label">ファイル読み込み</label>
+                <input type="file" id="tileFileInput" accept=".json">
+                <button id="clearTileBtn">消去</button>
+            </div>
+
+            <div class="summary" id="tileCounts">未読み込み</div>
+
+            <div class="row">
+                <span class="label">現在公開中</span>
+                <input type="text" class="text-input" id="tilePublished" readonly>
+            </div>
+
+            <div class="row button-row">
+                <button class="action-btn publish-btn" id="publishTileBtn">公開</button>
+                <button id="exportTileBtn">読み込み結果を出力</button>
             </div>
         </section>
 

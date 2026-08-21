@@ -1,13 +1,16 @@
-// GeoJSON ファイルの読み込みと出力
+// 公開するファイルの読み込みと出力
 //
-// 読み込みはどちらのデータセットも「置換」方式（各データモジュールの load を参照）。
+// 読み込みはどのデータセットも「置換」方式（各データモジュールの load を参照）。
 // 出力は公開スキーマへ整形した結果を保存する。公開前の内容確認と、
 // 公開に失敗したときの控えの2つの用途がある。
+//
+// tiles は GeoJSON ではない（契約 2.1 §3.6）ため、出力の形も別に持つ。
 
 import { showMessage } from './message.js';
 import { getDateString, getDateTimeIso, saveBlobAsFile } from './utils.js';
 import * as MapData from './mapData.js';
 import * as ClosureData from './closureData.js';
+import * as TileData from './tileData.js';
 
 // ===== 読み込み =====
 
@@ -77,7 +80,21 @@ export function setupClosureLoad(onLoaded) {
     }, onLoaded);
 }
 
-// ===== 出力 =====
+export function setupTileLoad(onLoaded) {
+    bindFileInput('tileFileInput', (json, fileName) => {
+        const result = TileData.load(json);
+
+        if (result.total === 0) {
+            showMessage(`${fileName}: タイルが1枚もありません`, 'warning');
+            return;
+        }
+
+        const parts = TileData.getLayerCounts().map(l => `${l.key} ${l.count}`);
+        showMessage(`${result.total}枚を読み込みました（${parts.join(' / ')}）`, 'success');
+    }, onLoaded);
+}
+
+// ===== 出力ファイル名 =====
 
 // 出力ファイル名: MapData-yyyymmdd_P{ポイント}_R{ルート}_S{スポット}.geojson
 export function buildMapDataFileName() {
@@ -92,16 +109,42 @@ export function buildClosureFileName() {
     return `Closure-${getDateString()}_C${counts.closed}_D${counts.difficult}.geojson`;
 }
 
-// 公開スキーマへ整形した内容を保存する。
-// version はサーバーが採番するため、出力ファイルには含めない（updatedAt は出力日時）。
-export async function saveAsFile(data, filename) {
-    const body = {
+// 出力ファイル名: TileManifest-yyyymmdd_L{レイヤー数}_T{タイル枚数}.json
+// レイヤー別の枚数は5つあり名前に入れると長すぎるため、合計だけを付ける
+export function buildTileFileName() {
+    return `TileManifest-${getDateString()}`
+        + `_L${TileData.getLayerCounts().length}_T${TileData.getTotal()}.json`;
+}
+
+// ===== 出力 =====
+
+// 出力する中身を作る。version はサーバーが採番するため含めない（updatedAt は出力日時）。
+
+// GeoJSON データセット（mapdata / closures）
+export function toGeoJsonFileBody(data) {
+    return {
         type: 'FeatureCollection',
         updatedAt: getDateTimeIso(),
         features: data.features
     };
-    const blob = new Blob([JSON.stringify(body, null, 2)], { type: 'application/geo+json' });
-    return saveBlobAsFile(blob, filename);
+}
+
+// tiles（契約 §3.6。GeoJSON ではないので FeatureCollection の形にしない）
+export function toTileFileBody(data) {
+    return {
+        updatedAt: getDateTimeIso(),
+        source: data.source || '',
+        layers: data.layers
+    };
+}
+
+// 出力する中身（to〜FileBody の戻り値）をファイルとして保存する
+export async function saveAsFile(body, filename) {
+    const geoJson = body.type === 'FeatureCollection';
+    const blob = new Blob([JSON.stringify(body, null, 2)], {
+        type: geoJson ? 'application/geo+json' : 'application/json'
+    });
+    return saveBlobAsFile(blob, filename, geoJson ? 'GeoJSON Files' : 'JSON Files');
 }
 
 export function setupExportButtons() {
@@ -110,7 +153,8 @@ export function setupExportButtons() {
             showMessage('出力するハイキングマップデータがありません', 'warning');
             return;
         }
-        const saved = await saveAsFile(MapData.buildPublishData(), buildMapDataFileName());
+        const saved = await saveAsFile(
+            toGeoJsonFileBody(MapData.buildPublishData()), buildMapDataFileName());
         if (saved) showMessage('公開スキーマへ整形して出力しました', 'success');
     });
 
@@ -119,7 +163,19 @@ export function setupExportButtons() {
             showMessage('出力する登録地点がありません', 'warning');
             return;
         }
-        const saved = await saveAsFile(ClosureData.buildPublishData(), buildClosureFileName());
+        const saved = await saveAsFile(
+            toGeoJsonFileBody(ClosureData.buildPublishData()), buildClosureFileName());
         if (saved) showMessage('公開スキーマへ整形して出力しました', 'success');
+    });
+
+    // tiles は整形しない。読み込んだ内容の控えを取る用途で出力する
+    document.getElementById('exportTileBtn').addEventListener('click', async function () {
+        if (!TileData.isLoaded()) {
+            showMessage('出力するタイル一覧がありません', 'warning');
+            return;
+        }
+        const saved = await saveAsFile(
+            toTileFileBody(TileData.buildPublishData()), buildTileFileName());
+        if (saved) showMessage('読み込んだタイル一覧を出力しました', 'success');
     });
 }

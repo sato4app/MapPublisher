@@ -52,6 +52,34 @@ body {
     margin-left: auto;
 }
 
+/* ===== 公開するデータセットの切り替え ===== */
+/* 3つのデータセットを縦に並べると操作の焦点がぼやけるため、選んだ1つだけを出す。
+   MapEditor のモード切り替えと同じ流儀に揃える。 */
+.dataset-selector {
+    margin-bottom: 14px;
+}
+
+.dataset-selector label {
+    display: flex;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.dataset-selector label:last-child {
+    margin-bottom: 0;
+}
+
+.dataset-selector input[type="radio"] {
+    margin-right: 8px;
+}
+
+.dataset-selector .selected {
+    color: #007bff;
+    font-weight: bold;
+}
+
 .panel-section {
     border: 2px solid #999;
     border-radius: 8px;

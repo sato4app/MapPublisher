@@ -1,21 +1,42 @@
 // 公開（公開API へのPOST）
 //
-// 公開APIの仕様は minoh-hiking `docs/publish-api-202608.md`（契約バージョン 2.0）に従う。
-// このファイルに API の検証ルール（座標範囲・id一意・type の妥当性）を再実装しないこと。
+// 公開APIの仕様は minoh-hiking `docs/publish-api-202608.md`（契約バージョン 2.1）に従う。
+// このファイルに API の検証ルール（座標範囲・id一意・type の妥当性・タイルの z や
+// tile_count の照合）を再実装しないこと。
 // 判定はサーバーに任せ、失敗時は API が返した日本語メッセージをそのまま表示する
 // （二重管理を避けるため。仕様書 §11「実装しないこと」）。
 //
 // version も同じ理由でクライアント側では扱わない。採番はサーバーの責務であり、
 // 予測値を出すと採番ロジックを二重に持つことになる（仕様書 §4）。
 
-import { API_URLS, PUBLISH_TOKEN_KEY, MAPDATA_TYPES, MAPDATA_TYPE_LABELS } from './constants.js';
+import {
+    API_URLS, PUBLISH_TOKEN_KEY, MAPDATA_TYPES, MAPDATA_TYPE_LABELS, TILE_COUNT_UNIT
+} from './constants.js';
 import { showMessage } from './message.js';
 import * as MapData from './mapData.js';
 import * as ClosureData from './closureData.js';
-import { saveAsFile, buildMapDataFileName, buildClosureFileName } from './fileIO.js';
+import * as TileData from './tileData.js';
+import {
+    saveAsFile, toGeoJsonFileBody, toTileFileBody,
+    buildMapDataFileName, buildClosureFileName, buildTileFileName
+} from './fileIO.js';
 
-// ===== 件数の内訳 =====
-// 読み込んだデータと公開中のデータの双方に同じ関数を当て、同じ粒度で比べられるようにする。
+// ===== 件数・内訳・体裁の確認 =====
+// 内訳は読み込んだデータと公開中のデータの双方に同じ関数を当て、同じ粒度で比べられるようにする。
+
+// GeoJSON データセット（mapdata / closures）は Feature 数を数える
+function countFeatures(geojson) {
+    return Array.isArray(geojson && geojson.features) ? geojson.features.length : 0;
+}
+
+// クライアント側の検証は最小限にとどめる（仕様書 §11）。
+// tiles は GeoJSON ではないため、体裁の確認もデータセットごとに持つ。
+function validateGeoJson(data) {
+    if (!data || data.type !== 'FeatureCollection' || !Array.isArray(data.features)) {
+        return 'FeatureCollection 形式の geojson ではありません';
+    }
+    return null;
+}
 
 function breakdownMapData(geojson) {
     const counts = {};
@@ -42,30 +63,68 @@ function breakdownClosures(geojson) {
     ];
 }
 
+// タイル一覧はレイヤー別の枚数で示す。壊れたマニフェストや取り違えは、
+// 合計だけを見ても気づきにくく、レイヤー別なら公開直前に捕まえられる。
+function breakdownTiles(manifest) {
+    return TileData.layerCountsOf(manifest).map(l => ({ label: l.key, count: l.count }));
+}
+
 // ===== データセット定義 =====
 
+// 公開処理・確認ダイアログ・「現在公開中」表示・失敗時の控え保存は、
+// この表を回すだけで済むようにしてある。データセットを増やすときは1件足す。
+//
+// validate / count / fileBody をデータセット側に持たせているのは、tiles が
+// GeoJSON ではないため（契約 2.1 §3.6）。共通処理から FeatureCollection の
+// 決め打ちを外し、形の違いはこの表に閉じ込める。
 const DATASETS = {
     mapdata: {
         key: 'mapdata',
         label: 'ハイキングマップデータ',
         url: API_URLS.mapdata,
+        unit: '件',
+        sourceApp: 'MapEditor',
         displayId: 'mapDataPublished',
         buttonId: 'publishMapDataBtn',
         isLoaded: () => MapData.isLoaded(),
         build: () => MapData.buildPublishData(),
+        validate: validateGeoJson,
+        count: countFeatures,
         breakdown: breakdownMapData,
-        fileName: buildMapDataFileName
+        fileName: buildMapDataFileName,
+        fileBody: toGeoJsonFileBody
     },
     closures: {
         key: 'closures',
         label: '通行止め・通行困難地点',
         url: API_URLS.closures,
+        unit: '件',
+        sourceApp: 'MapEditor',
         displayId: 'closurePublished',
         buttonId: 'publishClosureBtn',
         isLoaded: () => ClosureData.isLoaded(),
         build: () => ClosureData.buildPublishData(),
+        validate: validateGeoJson,
+        count: countFeatures,
         breakdown: breakdownClosures,
-        fileName: buildClosureFileName
+        fileName: buildClosureFileName,
+        fileBody: toGeoJsonFileBody
+    },
+    tiles: {
+        key: 'tiles',
+        label: '地図タイルのダウンロード領域',
+        url: API_URLS.tiles,
+        unit: TILE_COUNT_UNIT,
+        sourceApp: 'DownloadArea',
+        displayId: 'tilePublished',
+        buttonId: 'publishTileBtn',
+        isLoaded: () => TileData.isLoaded(),
+        build: () => TileData.buildPublishData(),
+        validate: TileData.findFormatProblem,
+        count: TileData.countTilesOf,
+        breakdown: breakdownTiles,
+        fileName: buildTileFileName,
+        fileBody: toTileFileBody
     }
 };
 
@@ -102,8 +161,8 @@ function renderPublishedDisplay(dataset, info) {
         return;
     }
     display.value = info.version
-        ? `${info.version}（${info.count}件）`
-        : `未公開（${info.count}件）`;
+        ? `${info.version}（${info.count}${dataset.unit}）`
+        : `未公開（${info.count}${dataset.unit}）`;
 }
 
 // 「現在公開中」表示の更新。マニフェストが無ければ各データセットを直接取得する。
@@ -125,10 +184,7 @@ export async function refreshPublishedDisplays(notify = false) {
             // マニフェスト未実装・取得失敗時の代替経路
             const data = await fetchPublished(dataset);
             if (data) {
-                info = {
-                    version: data.version || '',
-                    count: Array.isArray(data.features) ? data.features.length : 0
-                };
+                info = { version: data.version || '', count: dataset.count(data) };
             }
         }
 
@@ -149,16 +205,24 @@ export async function refreshPublishedDisplays(notify = false) {
 
 // ===== 公開前の確認 =====
 
-// クライアント側の検証は最小限にとどめる（仕様書 §11）。
-function validateMinimal(data) {
-    if (!data || data.type !== 'FeatureCollection' || !Array.isArray(data.features)) {
-        return 'FeatureCollection 形式の geojson ではありません';
-    }
-    return null;
-}
-
 function formatBreakdown(breakdown) {
     return breakdown.map(b => `${b.label} ${b.count}`).join(' / ');
+}
+
+// 内訳の減少を拾う。tiles のレイヤーは増減も並び順の変化もありうるため、
+// 位置ではなく名前で突き合わせる（無くなった内訳は 0 への減少として扱う）。
+function findDecreases(publishedBreakdown, nextBreakdown) {
+    const before = new Map(publishedBreakdown.map(b => [b.label, b.count]));
+    const decreases = nextBreakdown
+        .map(b => ({ label: b.label, before: before.get(b.label) ?? 0, after: b.count }))
+        .filter(d => d.after < d.before);
+
+    const nextLabels = new Set(nextBreakdown.map(b => b.label));
+    publishedBreakdown
+        .filter(b => !nextLabels.has(b.label) && b.count > 0)
+        .forEach(b => decreases.push({ label: b.label, before: b.count, after: 0 }));
+
+    return decreases;
 }
 
 // 確認ダイアログ。version は自動採番のため巻き戻しの判別に使えない。
@@ -169,10 +233,11 @@ function buildConfirmMessage(dataset, published, publishedBreakdown, next) {
     if (published) {
         const version = published.version || '未公開';
         lines.push(`現在公開中: ${version}`);
-        if (publishedBreakdown) {
-            lines.push(`  ${formatBreakdown(publishedBreakdown)}（計 ${published.count}件）`);
+        // 未公開のときは内訳が空になる。空の内訳を並べても読み取れないため合計だけ出す
+        if (publishedBreakdown && publishedBreakdown.length > 0) {
+            lines.push(`  ${formatBreakdown(publishedBreakdown)}（計 ${published.count}${dataset.unit}）`);
         } else {
-            lines.push(`  計 ${published.count}件`);
+            lines.push(`  計 ${published.count}${dataset.unit}`);
         }
     } else {
         lines.push('現在公開中: 取得できませんでした');
@@ -180,13 +245,11 @@ function buildConfirmMessage(dataset, published, publishedBreakdown, next) {
 
     lines.push('');
     lines.push('これから公開: バージョンはサーバーが採番します');
-    lines.push(`  ${formatBreakdown(next.breakdown)}（計 ${next.count}件）`);
+    lines.push(`  ${formatBreakdown(next.breakdown)}（計 ${next.count}${dataset.unit}）`);
 
     // 減少はデータの取り違えである可能性が高いため、種別ごとに明示する
     if (publishedBreakdown) {
-        const decreases = next.breakdown
-            .map((b, i) => ({ label: b.label, before: publishedBreakdown[i].count, after: b.count }))
-            .filter(d => d.after < d.before);
+        const decreases = findDecreases(publishedBreakdown, next.breakdown);
 
         if (decreases.length > 0) {
             lines.push('');
@@ -199,7 +262,7 @@ function buildConfirmMessage(dataset, published, publishedBreakdown, next) {
 
     if (next.count === 0) {
         lines.push('');
-        lines.push('【注意】0件のため、公開中のデータがすべて地図から消えます。');
+        lines.push(`【注意】0${dataset.unit}のため、公開中のデータがすべて地図から消えます。`);
     }
 
     lines.push('', 'よろしいですか？');
@@ -217,15 +280,16 @@ async function readApiError(res) {
     return `HTTP ${res.status}`;
 }
 
-// 公開に失敗したとき、整形済みデータを端末に保存できるようにする
-// （作業のやり直し防止・開発担当者への連携用の控え）
+// 公開に失敗したとき、送ろうとしたデータを端末に保存できるようにする
+// （作業のやり直し防止・開発担当者への連携用の控え）。
+// 保存の形はデータセットごとに異なる（tiles は GeoJSON ではない）
 async function offerBackupDownload(dataset, data) {
     const filename = dataset.fileName();
     if (!confirm(`今回のデータをこの端末に保存しますか？（ファイル名: ${filename}）\n`
         + '保存しておくと、あとで公開をやり直したり、開発担当者に渡して調べてもらえます。')) {
         return;
     }
-    await saveAsFile(data, filename);
+    await saveAsFile(dataset.fileBody(data), filename);
 }
 
 async function publishDataset(dataset) {
@@ -236,7 +300,7 @@ async function publishDataset(dataset) {
 
     const data = dataset.build();
 
-    const invalid = validateMinimal(data);
+    const invalid = dataset.validate(data);
     if (invalid) {
         showMessage(`公開できません: ${invalid}`, 'error');
         return;
@@ -247,14 +311,11 @@ async function publishDataset(dataset) {
     // （公開は頻度が低く、確認の確実さを優先する）。
     const publishedData = await fetchPublished(dataset);
     const published = publishedData
-        ? {
-            version: publishedData.version || '',
-            count: Array.isArray(publishedData.features) ? publishedData.features.length : 0
-        }
+        ? { version: publishedData.version || '', count: dataset.count(publishedData) }
         : null;
     const publishedBreakdown = publishedData ? dataset.breakdown(publishedData) : null;
 
-    const next = { breakdown: dataset.breakdown(data), count: data.features.length };
+    const next = { breakdown: dataset.breakdown(data), count: dataset.count(data) };
 
     if (!confirm(buildConfirmMessage(dataset, published, publishedBreakdown, next))) {
         return;
@@ -288,7 +349,7 @@ async function publishDataset(dataset) {
             if (res.status === 400) {
                 // E03: 送信データの不備。データ側を直せば解決できる
                 alert(`【E03】公開データに不備があります。\n\n理由: ${detail}\n\n`
-                    + 'MapEditor で出力し直したファイルを読み込んで、やり直してください。');
+                    + `${dataset.sourceApp} で出力し直したファイルを読み込んで、やり直してください。`);
                 return;
             }
             if (res.status === 503) {
@@ -318,7 +379,7 @@ async function publishDataset(dataset) {
         await refreshPublishedDisplays();
 
         alert(`${dataset.label} バージョン ${result.version || '(不明)'}`
-            + `（${result.count ?? data.features.length}件）をユーザーへ公開しました。\n`
+            + `（${result.count ?? next.count}${dataset.unit}）をユーザーへ公開しました。\n`
             + '各端末には次回のマップ表示時に反映されます。\n\n'
             + '公開後の確認は minoh-hiking の地図で行ってください。');
     } catch (err) {

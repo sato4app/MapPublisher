@@ -45,15 +45,15 @@ export function escapeHtml(value) {
         .replace(/'/g, '&#39;');
 }
 
-// BlobをGeoJSONファイルとして保存（File System Access API、未対応時はダウンロードにフォールバック）
+// Blobをファイルとして保存（File System Access API、未対応時はダウンロードにフォールバック）
 // 戻り値: 保存した場合はtrue、ユーザーがキャンセルした場合はfalse
-export async function saveBlobAsFile(blob, filename) {
+export async function saveBlobAsFile(blob, filename, typeDescription = 'GeoJSON Files') {
     if ('showSaveFilePicker' in window) {
         try {
             const handle = await window.showSaveFilePicker({
                 suggestedName: filename,
                 types: [{
-                    description: 'GeoJSON Files',
+                    description: typeDescription,
                     accept: { 'application/json': ['.geojson', '.json'] }
                 }]
             });
