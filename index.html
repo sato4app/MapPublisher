@@ -23,44 +23,15 @@
 
         <!-- 公開するデータセット。見出しをクリックして開閉する。
              同じ name を持つ <details> は1つだけ開くため、操作の焦点は常に1つに絞られる。
-             「現在公開中」は見出しに置き、開いていないデータセットの版も見えるようにする
-             （↻ は3つ分をまとめて取得するため、1つしか見えないと結果を確かめられない）。
+
+             起動時はどれも開かない。まず「現在公開中」で3つの版を見渡し、
+             作業するデータセットだけを開く流れにする（「現在公開中」を見出しに置くのはこのため。
+             ↻ は3つ分をまとめて取得するので、1つしか見えないと結果を確かめられない）。
+
+             並び順は更新頻度の高い順（通行止め → ハイキングマップ → 地図タイル）。
+
              開閉は地図の表示とは無関係。地図に出す・出さないは各データセットの
              「地図に表示」に任せる（通行止め地点をハイキングマップデータに重ねて確かめられるように）。 -->
-
-        <!-- ハイキングマップデータ（ポイント・ルート・スポット） -->
-        <details class="panel-section" name="dataset" open>
-            <summary class="section-head">
-                <span class="section-title">ハイキングマップデータ</span>
-                <span class="published-row">
-                    <span class="label">現在公開中</span>
-                    <input type="text" class="text-input" id="mapDataPublished" readonly>
-                </span>
-            </summary>
-
-            <div class="section-body">
-                <div class="row">
-                    <label for="mapDataFileInput" class="file-input-label">ファイル読み込み</label>
-                    <input type="file" id="mapDataFileInput" accept=".geojson,.json">
-                    <button id="clearMapDataBtn">消去</button>
-                </div>
-
-                <div class="row">
-                    <label class="check-label">
-                        <input type="checkbox" id="mapDataVisible" checked>
-                        <span>地図に表示</span>
-                    </label>
-                </div>
-
-                <div class="summary" id="mapDataCounts">未読み込み</div>
-                <div class="summary-note" id="mapDataExcluded"></div>
-
-                <div class="row button-row">
-                    <button class="action-btn publish-btn" id="publishMapDataBtn">公開</button>
-                    <button id="exportMapDataBtn">公開済みデータを出力</button>
-                </div>
-            </div>
-        </details>
 
         <!-- 通行止め・通行困難地点 -->
         <details class="panel-section" name="dataset">
@@ -92,6 +63,40 @@
                 <div class="row button-row">
                     <button class="action-btn publish-btn" id="publishClosureBtn">公開</button>
                     <button id="exportClosureBtn">公開済みデータを出力</button>
+                </div>
+            </div>
+        </details>
+
+        <!-- ハイキングマップデータ（ポイント・ルート・スポット） -->
+        <details class="panel-section" name="dataset">
+            <summary class="section-head">
+                <span class="section-title">ハイキングマップデータ</span>
+                <span class="published-row">
+                    <span class="label">現在公開中</span>
+                    <input type="text" class="text-input" id="mapDataPublished" readonly>
+                </span>
+            </summary>
+
+            <div class="section-body">
+                <div class="row">
+                    <label for="mapDataFileInput" class="file-input-label">ファイル読み込み</label>
+                    <input type="file" id="mapDataFileInput" accept=".geojson,.json">
+                    <button id="clearMapDataBtn">消去</button>
+                </div>
+
+                <div class="row">
+                    <label class="check-label">
+                        <input type="checkbox" id="mapDataVisible" checked>
+                        <span>地図に表示</span>
+                    </label>
+                </div>
+
+                <div class="summary" id="mapDataCounts">未読み込み</div>
+                <div class="summary-note" id="mapDataExcluded"></div>
+
+                <div class="row button-row">
+                    <button class="action-btn publish-btn" id="publishMapDataBtn">公開</button>
+                    <button id="exportMapDataBtn">公開済みデータを出力</button>
                 </div>
             </div>
         </details>

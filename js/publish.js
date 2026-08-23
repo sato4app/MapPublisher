@@ -91,7 +91,29 @@ function fileVersion(published) {
 // validate / count / restore をデータセット側に持たせているのは、tiles が
 // GeoJSON ではないため（契約 2.1 §3.6）。共通処理から FeatureCollection の
 // 決め打ちを外し、形の違いはこの表に閉じ込める。
+//
+// 並び順は index.html のパネルと揃える（更新頻度の高い順）。
 const DATASETS = {
+    closures: {
+        key: 'closures',
+        label: '通行止め・通行困難地点',
+        url: API_URLS.closures,
+        unit: '件',
+        sourceApp: 'MapEditor',
+        displayId: 'closurePublished',
+        buttonId: 'publishClosureBtn',
+        exportButtonId: 'exportClosureBtn',
+        isLoaded: () => ClosureData.isLoaded(),
+        build: () => ClosureData.buildPublishData(),
+        restore: json => ClosureData.load(json),
+        validate: validateGeoJson,
+        count: countFeatures,
+        breakdown: breakdownClosures,
+        fileName: p => {
+            const b = breakdownClosures(p);
+            return `Closure-${fileVersion(p)}_C${b[0].count}_D${b[1].count}.geojson`;
+        }
+    },
     mapdata: {
         key: 'mapdata',
         label: 'ハイキングマップデータ',
@@ -111,26 +133,6 @@ const DATASETS = {
             const b = breakdownMapData(p);
             return `MapData-${fileVersion(p)}`
                 + `_P${b[0].count}_R${b[1].count}_S${b[2].count}.geojson`;
-        }
-    },
-    closures: {
-        key: 'closures',
-        label: '通行止め・通行困難地点',
-        url: API_URLS.closures,
-        unit: '件',
-        sourceApp: 'MapEditor',
-        displayId: 'closurePublished',
-        buttonId: 'publishClosureBtn',
-        exportButtonId: 'exportClosureBtn',
-        isLoaded: () => ClosureData.isLoaded(),
-        build: () => ClosureData.buildPublishData(),
-        restore: json => ClosureData.load(json),
-        validate: validateGeoJson,
-        count: countFeatures,
-        breakdown: breakdownClosures,
-        fileName: p => {
-            const b = breakdownClosures(p);
-            return `Closure-${fileVersion(p)}_C${b[0].count}_D${b[1].count}.geojson`;
         }
     },
     tiles: {
