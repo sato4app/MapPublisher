@@ -1,13 +1,13 @@
-// 公開するファイルの読み込みと出力
+// 公開するファイルの読み込みと、ファイル保存の共通処理
 //
 // 読み込みはどのデータセットも「置換」方式（各データモジュールの load を参照）。
-// 出力は公開スキーマへ整形した結果を保存する。公開前の内容確認と、
-// 公開に失敗したときの控えの2つの用途がある。
 //
-// tiles は GeoJSON ではない（契約 2.1 §3.6）ため、出力の形も別に持つ。
+// 出力するのは公開済みデータであり、その取得とファイル名の組み立ては publish.js が持つ
+// （公開APIから取ってくる処理と同じ場所にあるほうが追いやすいため）。
+// ここには保存の作法だけを置く。
 
 import { showMessage } from './message.js';
-import { getDateString, getDateTimeIso, saveBlobAsFile } from './utils.js';
+import { saveBlobAsFile } from './utils.js';
 import * as MapData from './mapData.js';
 import * as ClosureData from './closureData.js';
 import * as TileData from './tileData.js';
@@ -94,88 +94,14 @@ export function setupTileLoad(onLoaded) {
     }, onLoaded);
 }
 
-// ===== 出力ファイル名 =====
-
-// 出力ファイル名: MapData-yyyymmdd_P{ポイント}_R{ルート}_S{スポット}.geojson
-export function buildMapDataFileName() {
-    const c = Object.fromEntries(MapData.getCounts().map(x => [x.type, x.count]));
-    return `MapData-${getDateString()}`
-        + `_P${c['ポイントGPS'] || 0}_R${c.route || 0}_S${c.spot || 0}.geojson`;
-}
-
-// 出力ファイル名: Closure-yyyymmdd_C{通行止め}_D{通行困難}.geojson
-export function buildClosureFileName() {
-    const counts = ClosureData.getCounts();
-    return `Closure-${getDateString()}_C${counts.closed}_D${counts.difficult}.geojson`;
-}
-
-// 出力ファイル名: TileManifest-yyyymmdd_L{レイヤー数}_T{タイル枚数}.json
-// レイヤー別の枚数は5つあり名前に入れると長すぎるため、合計だけを付ける
-export function buildTileFileName() {
-    return `TileManifest-${getDateString()}`
-        + `_L${TileData.getLayerCounts().length}_T${TileData.getTotal()}.json`;
-}
-
 // ===== 出力 =====
 
-// 出力する中身を作る。version はサーバーが採番するため含めない（updatedAt は出力日時）。
-
-// GeoJSON データセット（mapdata / closures）
-export function toGeoJsonFileBody(data) {
-    return {
-        type: 'FeatureCollection',
-        updatedAt: getDateTimeIso(),
-        features: data.features
-    };
-}
-
-// tiles（契約 §3.6。GeoJSON ではないので FeatureCollection の形にしない）
-export function toTileFileBody(data) {
-    return {
-        updatedAt: getDateTimeIso(),
-        source: data.source || '',
-        layers: data.layers
-    };
-}
-
-// 出力する中身（to〜FileBody の戻り値）をファイルとして保存する
+// 中身をファイルとして保存する。GeoJSON かどうかで拡張子の候補と MIME を変える
+// （tiles は GeoJSON ではない。契約 2.1 §3.6）。
 export async function saveAsFile(body, filename) {
     const geoJson = body.type === 'FeatureCollection';
     const blob = new Blob([JSON.stringify(body, null, 2)], {
         type: geoJson ? 'application/geo+json' : 'application/json'
     });
     return saveBlobAsFile(blob, filename, geoJson ? 'GeoJSON Files' : 'JSON Files');
-}
-
-export function setupExportButtons() {
-    document.getElementById('exportMapDataBtn').addEventListener('click', async function () {
-        if (!MapData.isLoaded()) {
-            showMessage('出力するハイキングマップデータがありません', 'warning');
-            return;
-        }
-        const saved = await saveAsFile(
-            toGeoJsonFileBody(MapData.buildPublishData()), buildMapDataFileName());
-        if (saved) showMessage('公開スキーマへ整形して出力しました', 'success');
-    });
-
-    document.getElementById('exportClosureBtn').addEventListener('click', async function () {
-        if (!ClosureData.isLoaded()) {
-            showMessage('出力する登録地点がありません', 'warning');
-            return;
-        }
-        const saved = await saveAsFile(
-            toGeoJsonFileBody(ClosureData.buildPublishData()), buildClosureFileName());
-        if (saved) showMessage('公開スキーマへ整形して出力しました', 'success');
-    });
-
-    // tiles は整形しない。読み込んだ内容の控えを取る用途で出力する
-    document.getElementById('exportTileBtn').addEventListener('click', async function () {
-        if (!TileData.isLoaded()) {
-            showMessage('出力するタイル一覧がありません', 'warning');
-            return;
-        }
-        const saved = await saveAsFile(
-            toTileFileBody(TileData.buildPublishData()), buildTileFileName());
-        if (saved) showMessage('読み込んだタイル一覧を出力しました', 'success');
-    });
 }

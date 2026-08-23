@@ -8,18 +8,23 @@
 //
 // version も同じ理由でクライアント側では扱わない。採番はサーバーの責務であり、
 // 予測値を出すと採番ロジックを二重に持つことになる（仕様書 §4）。
+//
+// 画面は「いまユーザーに見えているもの」を映すことを原則とする。公開に失敗したときは
+// 読み込んだデータを捨てて公開中の状態へ戻し、地図と件数が公開されていない内容を
+// 映したままになるのを防ぐ。
 
 import {
     API_URLS, PUBLISH_TOKEN_KEY, MAPDATA_TYPES, MAPDATA_TYPE_LABELS, TILE_COUNT_UNIT
 } from './constants.js';
 import { showMessage } from './message.js';
+import { getDateString } from './utils.js';
 import * as MapData from './mapData.js';
 import * as ClosureData from './closureData.js';
 import * as TileData from './tileData.js';
-import {
-    saveAsFile, toGeoJsonFileBody, toTileFileBody,
-    buildMapDataFileName, buildClosureFileName, buildTileFileName
-} from './fileIO.js';
+import { saveAsFile } from './fileIO.js';
+
+// 読み込み済みデータが入れ替わったときに件数サマリを描き直す関数。setupPublish で受け取る
+let notifyDataChanged = () => {};
 
 // ===== 件数・内訳・体裁の確認 =====
 // 内訳は読み込んだデータと公開中のデータの双方に同じ関数を当て、同じ粒度で比べられるようにする。
@@ -69,12 +74,21 @@ function breakdownTiles(manifest) {
     return TileData.layerCountsOf(manifest).map(l => ({ label: l.key, count: l.count }));
 }
 
+// ===== 出力ファイル名 =====
+// 出力するのは公開済みデータのため、日付ではなくバージョンで識別できるようにする
+// （同じ日に別のバージョンを取り出しても名前がぶつからない）。
+
+// バージョンが取れないとき（未公開・応答に version が無い）は日付で代用する
+function fileVersion(published) {
+    return published.version || getDateString();
+}
+
 // ===== データセット定義 =====
 
-// 公開処理・確認ダイアログ・「現在公開中」表示・失敗時の控え保存は、
+// 公開処理・確認ダイアログ・「現在公開中」表示・公開済みデータの出力・失敗時の復元は、
 // この表を回すだけで済むようにしてある。データセットを増やすときは1件足す。
 //
-// validate / count / fileBody をデータセット側に持たせているのは、tiles が
+// validate / count / restore をデータセット側に持たせているのは、tiles が
 // GeoJSON ではないため（契約 2.1 §3.6）。共通処理から FeatureCollection の
 // 決め打ちを外し、形の違いはこの表に閉じ込める。
 const DATASETS = {
@@ -86,13 +100,18 @@ const DATASETS = {
         sourceApp: 'MapEditor',
         displayId: 'mapDataPublished',
         buttonId: 'publishMapDataBtn',
+        exportButtonId: 'exportMapDataBtn',
         isLoaded: () => MapData.isLoaded(),
         build: () => MapData.buildPublishData(),
+        restore: json => MapData.load(json),
         validate: validateGeoJson,
         count: countFeatures,
         breakdown: breakdownMapData,
-        fileName: buildMapDataFileName,
-        fileBody: toGeoJsonFileBody
+        fileName: p => {
+            const b = breakdownMapData(p);
+            return `MapData-${fileVersion(p)}`
+                + `_P${b[0].count}_R${b[1].count}_S${b[2].count}.geojson`;
+        }
     },
     closures: {
         key: 'closures',
@@ -102,13 +121,17 @@ const DATASETS = {
         sourceApp: 'MapEditor',
         displayId: 'closurePublished',
         buttonId: 'publishClosureBtn',
+        exportButtonId: 'exportClosureBtn',
         isLoaded: () => ClosureData.isLoaded(),
         build: () => ClosureData.buildPublishData(),
+        restore: json => ClosureData.load(json),
         validate: validateGeoJson,
         count: countFeatures,
         breakdown: breakdownClosures,
-        fileName: buildClosureFileName,
-        fileBody: toGeoJsonFileBody
+        fileName: p => {
+            const b = breakdownClosures(p);
+            return `Closure-${fileVersion(p)}_C${b[0].count}_D${b[1].count}.geojson`;
+        }
     },
     tiles: {
         key: 'tiles',
@@ -118,13 +141,16 @@ const DATASETS = {
         sourceApp: 'DownloadArea',
         displayId: 'tilePublished',
         buttonId: 'publishTileBtn',
+        exportButtonId: 'exportTileBtn',
         isLoaded: () => TileData.isLoaded(),
         build: () => TileData.buildPublishData(),
+        restore: json => TileData.load(json),
         validate: TileData.findFormatProblem,
         count: TileData.countTilesOf,
         breakdown: breakdownTiles,
-        fileName: buildTileFileName,
-        fileBody: toTileFileBody
+        // レイヤー別の枚数は5つあり名前に入れると長すぎるため、レイヤー数と合計だけを付ける
+        fileName: p => `TileManifest-${fileVersion(p)}`
+            + `_L${TileData.layerCountsOf(p).length}_T${TileData.countTilesOf(p)}.json`
     }
 };
 
@@ -200,6 +226,32 @@ export async function refreshPublishedDisplays(notify = false) {
         } else {
             showMessage('現在公開中の情報を取得できませんでした', 'warning');
         }
+    }
+}
+
+// ===== 公開済みデータの出力 =====
+
+// いま公開されているデータをそのままファイルに保存する。
+// 公開前に押せば前回公開分、公開後に押せば今回公開分が出る。
+//
+// 読み込んだデータではなくサーバーの応答を保存するため、version と updatedAt も
+// 含めて「公開されている姿」がそのまま残る。整形は行わない（公開スキーマの正本は
+// サーバーが持っており、ここで作り直すと二重管理になる）。
+async function exportPublished(dataset) {
+    const data = await fetchPublished(dataset);
+
+    if (!data) {
+        showMessage(`公開中の${dataset.label}を取得できませんでした`, 'warning');
+        return;
+    }
+    if (!data.version) {
+        showMessage(`${dataset.label}はまだ公開されていません`, 'warning');
+        return;
+    }
+
+    const saved = await saveAsFile(data, dataset.fileName(data));
+    if (saved) {
+        showMessage(`公開中の${dataset.label}（${data.version}）を出力しました`, 'success');
     }
 }
 
@@ -280,16 +332,101 @@ async function readApiError(res) {
     return `HTTP ${res.status}`;
 }
 
-// 公開に失敗したとき、送ろうとしたデータを端末に保存できるようにする
-// （作業のやり直し防止・開発担当者への連携用の控え）。
-// 保存の形はデータセットごとに異なる（tiles は GeoJSON ではない）
-async function offerBackupDownload(dataset, data) {
-    const filename = dataset.fileName();
-    if (!confirm(`今回のデータをこの端末に保存しますか？（ファイル名: ${filename}）\n`
-        + '保存しておくと、あとで公開をやり直したり、開発担当者に渡して調べてもらえます。')) {
+// 公開APIへ送る。成功したら true。失敗したときはエラーコード（E01〜E06）付きで案内して
+// false を返す。運用担当者が開発担当者へコードを伝えるだけで原因を切り分けられるようにする。
+//
+// 失敗すると読み込んだデータは破棄されるため、案内はいずれも
+// 「ファイルを読み込み直してやり直す」流れに揃える。
+async function sendPublish(dataset, data, token, next) {
+    try {
+        const res = await fetch(dataset.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-publish-token': token },
+            body: JSON.stringify(data)
+        });
+
+        if (res.status === 401) {
+            // E01: 入力した公開トークンが違う。運用担当者が再入力で解決できる
+            localStorage.removeItem(PUBLISH_TOKEN_KEY);
+            alert('【E01】公開トークンが正しくありません。\n\n'
+                + 'ファイルを読み込み直し、もう一度「公開」を押して、'
+                + '正しいトークンを入力してください。\n'
+                + 'トークンが分からないときは、開発担当者に確認してください。');
+            return false;
+        }
+        if (!res.ok) {
+            const detail = await readApiError(res);
+            if (res.status === 400) {
+                // E03: 送信データの不備。データ側を直せば解決できる
+                alert(`【E03】公開データに不備があります。\n\n理由: ${detail}\n\n`
+                    + `${dataset.sourceApp} で出力し直したファイルを読み込んで、やり直してください。`);
+                return false;
+            }
+            if (res.status === 503) {
+                // E02: サーバー側の公開トークン未設定。操作では直らず開発担当者対応
+                alert('【E02】公開機能がサーバー側でまだ設定されていません。\n\n'
+                    + 'この画面の操作では直りません。\n'
+                    + '開発担当者に「エラー E02（公開トークン未設定）」と伝えてください。');
+                return false;
+            }
+            if (res.status === 404) {
+                // E06: エンドポイント未実装。移行作業中に起こりうる
+                alert(`【E06】公開先が見つかりません（${dataset.label}）。\n\n`
+                    + 'サーバー側の公開機能がまだ用意されていない可能性があります。\n'
+                    + '開発担当者に「エラー E06（エンドポイント未実装）」と伝えてください。');
+                return false;
+            }
+            // E04: 公開ストアへの保存失敗。多くは時間をおくと回復。続く場合は開発担当者対応
+            alert(`【E04】公開データの保存に失敗しました（サーバー側）。\n\n詳細: ${detail}\n\n`
+                + '少し時間をおいて、ファイルを読み込み直してからもう一度お試しください。\n'
+                + '何度も続くときは、開発担当者に「エラー E04（公開ストア保存失敗）」と伝えてください。');
+            return false;
+        }
+
+        localStorage.setItem(PUBLISH_TOKEN_KEY, token);
+        const result = await res.json().catch(() => ({}));
+        await refreshPublishedDisplays();
+
+        alert(`${dataset.label} バージョン ${result.version || '(不明)'}`
+            + `（${result.count ?? next.count}${dataset.unit}）をユーザーへ公開しました。\n`
+            + '各端末には次回のマップ表示時に反映されます。\n\n'
+            + '公開後の確認は minoh-hiking の地図で行ってください。');
+        return true;
+    } catch (err) {
+        // E05: API に接続できない（通信断・CORS・サーバー障害など）
+        alert('【E05】公開サーバーに接続できませんでした（通信エラー）。\n\n'
+            + 'まず通信状況を確認して、ファイルを読み込み直してからもう一度お試しください。\n'
+            + `続くときは、開発担当者に「エラー E05（通信エラー）: ${err.message}」と伝えてください。`);
+        return false;
+    }
+}
+
+// 公開に失敗したときに、読み込んだデータを捨てて公開中の状態へ戻す。
+// 公開されていない内容が地図と件数に残っていると、いま何が公開されているのか
+// 分からなくなるため。
+//
+// ただし通信エラーのときは公開中のデータも取得できない。戻しようがないので
+// 読み込んだデータはそのまま残し、画面が公開状態と食い違っていることを知らせる。
+async function restoreToPublished(dataset) {
+    const data = await fetchPublished(dataset);
+    await refreshPublishedDisplays();
+
+    if (!data) {
+        showMessage(`公開中の${dataset.label}を取得できませんでした。`
+            + '\n画面には読み込んだデータが残っています', 'warning');
         return;
     }
-    await saveAsFile(dataset.fileBody(data), filename);
+
+    try {
+        dataset.restore(data);
+    } catch (error) {
+        console.error('公開中のデータの読み込みに失敗:', error);
+        showMessage(`公開中の${dataset.label}を読み込めませんでした: ${error.message}`, 'error');
+        return;
+    }
+
+    notifyDataChanged();
+    showMessage(`公開中の${dataset.label}に戻しました`, 'warning');
 }
 
 async function publishDataset(dataset) {
@@ -327,68 +464,10 @@ async function publishDataset(dataset) {
         if (!token) return;
     }
 
-    try {
-        const res = await fetch(dataset.url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-publish-token': token },
-            body: JSON.stringify(data)
-        });
+    const ok = await sendPublish(dataset, data, token, next);
 
-        // 失敗時はエラーコード（E01〜E05）付きで案内する。運用担当者が開発担当者へ
-        // コードを伝えるだけで原因を切り分けられるようにする。
-        if (res.status === 401) {
-            // E01: 入力した公開トークンが違う。運用担当者が再入力で解決できる
-            localStorage.removeItem(PUBLISH_TOKEN_KEY);
-            alert('【E01】公開トークンが正しくありません。\n\n'
-                + 'もう一度「公開」を押して、正しいトークンを入力してください。\n'
-                + 'トークンが分からないときは、開発担当者に確認してください。');
-            return;
-        }
-        if (!res.ok) {
-            const detail = await readApiError(res);
-            if (res.status === 400) {
-                // E03: 送信データの不備。データ側を直せば解決できる
-                alert(`【E03】公開データに不備があります。\n\n理由: ${detail}\n\n`
-                    + `${dataset.sourceApp} で出力し直したファイルを読み込んで、やり直してください。`);
-                return;
-            }
-            if (res.status === 503) {
-                // E02: サーバー側の公開トークン未設定。操作では直らず開発担当者対応
-                alert('【E02】公開機能がサーバー側でまだ設定されていません。\n\n'
-                    + 'この画面の操作では直りません。\n'
-                    + '開発担当者に「エラー E02（公開トークン未設定）」と伝えてください。');
-                return;
-            }
-            if (res.status === 404) {
-                // E06: エンドポイント未実装。移行作業中に起こりうる
-                alert(`【E06】公開先が見つかりません（${dataset.label}）。\n\n`
-                    + 'サーバー側の公開機能がまだ用意されていない可能性があります。\n'
-                    + '開発担当者に「エラー E06（エンドポイント未実装）」と伝えてください。');
-                return;
-            }
-            // E04: 公開ストアへの保存失敗。多くは時間をおくと回復。続く場合は開発担当者対応
-            alert(`【E04】公開データの保存に失敗しました（サーバー側）。\n\n詳細: ${detail}\n\n`
-                + '少し時間をおいて、もう一度「公開」をお試しください。\n'
-                + '何度も続くときは、開発担当者に「エラー E04（公開ストア保存失敗）」と伝えてください。');
-            await offerBackupDownload(dataset, data);
-            return;
-        }
-
-        localStorage.setItem(PUBLISH_TOKEN_KEY, token);
-        const result = await res.json().catch(() => ({}));
-        await refreshPublishedDisplays();
-
-        alert(`${dataset.label} バージョン ${result.version || '(不明)'}`
-            + `（${result.count ?? next.count}${dataset.unit}）をユーザーへ公開しました。\n`
-            + '各端末には次回のマップ表示時に反映されます。\n\n'
-            + '公開後の確認は minoh-hiking の地図で行ってください。');
-    } catch (err) {
-        // E05: API に接続できない（通信断・CORS・サーバー障害など）
-        alert('【E05】公開サーバーに接続できませんでした（通信エラー）。\n\n'
-            + 'まず通信状況を確認して、もう一度お試しください。\n'
-            + `続くときは、開発担当者に「エラー E05（通信エラー）: ${err.message}」と伝えてください。`);
-        await offerBackupDownload(dataset, data);
-    }
+    // 失敗したら読み込んだデータを捨て、画面を公開中の状態へ戻す
+    if (!ok) await restoreToPublished(dataset);
 }
 
 // 端末に保存した公開トークンを消去する（共用端末を離れるときなどに使う）
@@ -404,17 +483,26 @@ function clearToken() {
     showMessage('公開トークンを消去しました', 'success');
 }
 
-export function setupPublish() {
-    // 二重送信の防止。確認ダイアログ・トークン入力を挟む間も押せないようにする
+// クリックしている間はボタンを押せなくする。確認ダイアログ・トークン入力・
+// 通信を挟む間の二重実行を防ぐ。
+function bindBusyButton(id, handler) {
+    document.getElementById(id).addEventListener('click', async function () {
+        this.disabled = true;
+        try {
+            await handler();
+        } finally {
+            this.disabled = false;
+        }
+    });
+}
+
+// onDataChanged: 読み込み済みデータが入れ替わったときに件数サマリを描き直す（app.js が渡す）
+export function setupPublish(onDataChanged) {
+    notifyDataChanged = onDataChanged || (() => {});
+
     Object.values(DATASETS).forEach(dataset => {
-        document.getElementById(dataset.buttonId).addEventListener('click', async function () {
-            this.disabled = true;
-            try {
-                await publishDataset(dataset);
-            } finally {
-                this.disabled = false;
-            }
-        });
+        bindBusyButton(dataset.buttonId, () => publishDataset(dataset));
+        bindBusyButton(dataset.exportButtonId, () => exportPublished(dataset));
     });
 
     document.getElementById('clearTokenBtn').addEventListener('click', clearToken);

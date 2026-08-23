@@ -9,20 +9,6 @@ export function getDateString() {
     return `${year}${month}${day}`;
 }
 
-// 日時文字列生成（ISO 8601 / タイムゾーンオフセット付き。出力ファイルの updatedAt で使用）
-export function getDateTimeIso() {
-    const now = new Date();
-    const pad = n => String(n).padStart(2, '0');
-    const offsetMinutes = -now.getTimezoneOffset();
-    const sign = offsetMinutes >= 0 ? '+' : '-';
-    const absMinutes = Math.abs(offsetMinutes);
-    const offsetHH = pad(Math.floor(absMinutes / 60));
-    const offsetMM = pad(absMinutes % 60);
-    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
-        `T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}` +
-        `${sign}${offsetHH}:${offsetMM}`;
-}
-
 // 座標値を小数点以下5桁に丸める（経度・緯度・標高。配列にも再帰対応）
 // 内部に保持する座標は読み込んだ精度のままとし、丸めは出力時のみ適用する。
 export function roundCoord(value) {

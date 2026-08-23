@@ -9,7 +9,7 @@ import { showMessage } from './message.js';
 import * as MapData from './mapData.js';
 import * as ClosureData from './closureData.js';
 import * as TileData from './tileData.js';
-import { setupMapDataLoad, setupClosureLoad, setupTileLoad, setupExportButtons } from './fileIO.js';
+import { setupMapDataLoad, setupClosureLoad, setupTileLoad } from './fileIO.js';
 import { setupPublish } from './publish.js';
 
 // ===== 初期化 =====
@@ -69,13 +69,20 @@ function updateTileSummary() {
     summary.textContent = `${parts.join(' / ')}（計 ${TileData.getTotal()}枚）`;
 }
 
-// ===== ファイル読み込み・出力・公開 =====
+// 公開に失敗して公開中のデータへ戻したときなど、読み込み済みデータが
+// 入れ替わったら3つとも描き直す
+function updateAllSummaries() {
+    updateMapDataSummary();
+    updateClosureSummary();
+    updateTileSummary();
+}
+
+// ===== ファイル読み込み・公開 =====
 
 setupMapDataLoad(updateMapDataSummary);
 setupClosureLoad(updateClosureSummary);
 setupTileLoad(updateTileSummary);
-setupExportButtons();
-setupPublish();
+setupPublish(updateAllSummaries);
 
 // ===== データセットの開閉 =====
 // 同じ name を持つ <details> は1つだけ開く（HTML標準）。未対応のブラウザでは
@@ -136,6 +143,4 @@ document.getElementById('clearTileBtn').addEventListener('click', function () {
 });
 
 // 初期表示
-updateMapDataSummary();
-updateClosureSummary();
-updateTileSummary();
+updateAllSummaries();
