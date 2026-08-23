@@ -77,23 +77,23 @@ setupTileLoad(updateTileSummary);
 setupExportButtons();
 setupPublish();
 
-// ===== 公開するデータセットの切り替え =====
-// パネルの表示だけを切り替える。地図に出す・出さないは各データセットの
-// 「地図に表示」に任せる（通行止め地点をハイキングマップデータに重ねて確かめられるように）。
+// ===== データセットの開閉 =====
+// 同じ name を持つ <details> は1つだけ開く（HTML標準）。未対応のブラウザでは
+// 3つとも開けてしまいパネルが地図を覆うため、そのときだけ他を閉じる。
+// 開閉は地図の表示とは無関係（index.html の注記を参照）。
 
-document.querySelectorAll('input[name="dataset"]').forEach(radio => {
-    radio.addEventListener('change', function () {
-        if (!this.checked) return;
+if (!('name' in document.createElement('details'))) {
+    const sections = document.querySelectorAll('.panel-section');
 
-        document.querySelectorAll('.dataset-selector label span')
-            .forEach(span => span.classList.remove('selected'));
-        this.nextElementSibling.classList.add('selected');
-
-        document.querySelectorAll('.panel-section[data-panel]').forEach(section => {
-            section.hidden = section.dataset.panel !== this.value;
+    sections.forEach(section => {
+        section.addEventListener('toggle', function () {
+            if (!this.open) return;
+            sections.forEach(other => {
+                if (other !== this) other.open = false;
+            });
         });
     });
-});
+}
 
 // ===== 表示切り替え・消去 =====
 

@@ -1,7 +1,7 @@
 // アプリケーション全体で使用する定数定義
 
 // 版日付（MapGPS のカードに表示する版と揃える）
-export const APP_VERSION = '2026-08-21';
+export const APP_VERSION = '2026-08-23';
 
 // デフォルト設定
 export const DEFAULTS = {
