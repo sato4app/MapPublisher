@@ -1,13 +1,14 @@
 // 公開（公開API へのPOST）
 //
-// 公開APIの仕様は minoh-hiking `docs/publish-api-202608.md`（契約バージョン 2.1）に従う。
+// 公開APIの仕様は minoh-hiking `docs/publish-api-202608.md`（契約バージョン 3.0）に従う。
 // このファイルに API の検証ルール（座標範囲・id一意・type の妥当性・タイルの z や
 // tile_count の照合）を再実装しないこと。
 // 判定はサーバーに任せ、失敗時は API が返した日本語メッセージをそのまま表示する
 // （二重管理を避けるため。仕様書 §11「実装しないこと」）。
 //
-// version も同じ理由でクライアント側では扱わない。採番はサーバーの責務であり、
-// 予測値を出すと採番ロジックを二重に持つことになる（仕様書 §4）。
+// version は契約 3.0 で送信側が決めることになった（仕様書 §4）。既定値の算出と
+// 形式の判定は js/version.js に置く。サーバーも同じ形式判定と重複拒否を行うため、
+// 画面のチェックは「送る前に気づける」ようにするためのもので、最後の砦ではない。
 //
 // 画面は「いまユーザーに見えているもの」を映すことを原則とする。公開に失敗したときは
 // 読み込んだデータを捨てて公開中の状態へ戻し、地図と件数が公開されていない内容を
@@ -18,6 +19,7 @@ import {
 } from './constants.js';
 import { showMessage } from './message.js';
 import { getDateString } from './utils.js';
+import { isValidVersion, nextVersion } from './version.js';
 import * as MapData from './mapData.js';
 import * as ClosureData from './closureData.js';
 import * as TileData from './tileData.js';
@@ -102,6 +104,7 @@ const DATASETS = {
         sourceApp: 'MapEditor',
         displayId: 'closurePublished',
         buttonId: 'publishClosureBtn',
+        versionInputId: 'closureVersion',
         exportButtonId: 'exportClosureBtn',
         isLoaded: () => ClosureData.isLoaded(),
         build: () => ClosureData.buildPublishData(),
@@ -122,6 +125,7 @@ const DATASETS = {
         sourceApp: 'MapEditor',
         displayId: 'mapDataPublished',
         buttonId: 'publishMapDataBtn',
+        versionInputId: 'mapDataVersion',
         exportButtonId: 'exportMapDataBtn',
         isLoaded: () => MapData.isLoaded(),
         build: () => MapData.buildPublishData(),
@@ -143,6 +147,7 @@ const DATASETS = {
         sourceApp: 'DownloadArea',
         displayId: 'tilePublished',
         buttonId: 'publishTileBtn',
+        versionInputId: 'tileVersion',
         exportButtonId: 'exportTileBtn',
         isLoaded: () => TileData.isLoaded(),
         build: () => TileData.buildPublishData(),
@@ -193,6 +198,26 @@ function renderPublishedDisplay(dataset, info) {
         : `未公開（${info.count}${dataset.unit}）`;
 }
 
+// ===== 公開バージョンの入力欄 =====
+
+function versionInput(dataset) {
+    return document.getElementById(dataset.versionInputId);
+}
+
+// 「現在公開中」から既定値（+1）を入れる。
+// 運用者が手で書き換えたあとは触らない。`.08` の次を `.10` にするといった
+// 意図した番号が、再取得のたびに消えてしまわないようにするため。
+function fillDefaultVersion(dataset, publishedVersion) {
+    const input = versionInput(dataset);
+    if (input.dataset.edited === 'true') return;
+    input.value = nextVersion(publishedVersion);
+}
+
+// 公開に成功したら手編集の印を消し、次の既定値が入るようにする
+function clearVersionEdited(dataset) {
+    versionInput(dataset).dataset.edited = '';
+}
+
 // 「現在公開中」表示の更新。マニフェストが無ければ各データセットを直接取得する。
 export async function refreshPublishedDisplays(notify = false) {
     Object.values(DATASETS).forEach(d => {
@@ -217,7 +242,11 @@ export async function refreshPublishedDisplays(notify = false) {
         }
 
         renderPublishedDisplay(dataset, info);
-        if (info) ok++;
+        // 取得できなかったときは既定値を作れない。入力欄はそのまま残す
+        if (info) {
+            fillDefaultVersion(dataset, info.version);
+            ok++;
+        }
     }
 
     if (notify) {
@@ -279,8 +308,9 @@ function findDecreases(publishedBreakdown, nextBreakdown) {
     return decreases;
 }
 
-// 確認ダイアログ。version は自動採番のため巻き戻しの判別に使えない。
-// 代わりに種別ごとの件数差分を示し、誤ったファイルからの公開に気づけるようにする。
+// 確認ダイアログ。version は運用者が決めるが、番号を見ても内容の取り違えは分からない
+// （古いファイルから新しい番号で公開できてしまう）。種別ごとの件数差分を並記し、
+// 誤ったファイルからの公開に気づけるようにする。
 function buildConfirmMessage(dataset, published, publishedBreakdown, next) {
     const lines = [`${dataset.label}をユーザーへ公開します。`, ''];
 
@@ -298,7 +328,7 @@ function buildConfirmMessage(dataset, published, publishedBreakdown, next) {
     }
 
     lines.push('');
-    lines.push('これから公開: バージョンはサーバーが採番します');
+    lines.push(`これから公開: ${next.version}`);
     lines.push(`  ${formatBreakdown(next.breakdown)}（計 ${next.count}${dataset.unit}）`);
 
     // 減少はデータの取り違えである可能性が高いため、種別ごとに明示する
@@ -387,6 +417,8 @@ async function sendPublish(dataset, data, token, next) {
 
         localStorage.setItem(PUBLISH_TOKEN_KEY, token);
         const result = await res.json().catch(() => ({}));
+        // 手編集の印を消してから再取得する。次の既定値が公開した番号の +1 になる
+        clearVersionEdited(dataset);
         await refreshPublishedDisplays();
 
         alert(`${dataset.label} バージョン ${result.version || '(不明)'}`
@@ -437,7 +469,17 @@ async function publishDataset(dataset) {
         return;
     }
 
-    const data = dataset.build();
+    // 公開バージョンは送信側が決める（契約 §4.2）。形式はここで確かめる。
+    // サーバーでも同じ判定を行うが、送る前に気づけるほうが直しやすい
+    const version = versionInput(dataset).value.trim();
+    if (!isValidVersion(version)) {
+        showMessage('公開バージョンは yyyy.nn 形式で入力してください（例: 2026.01）', 'error');
+        versionInput(dataset).focus();
+        return;
+    }
+
+    // version は公開時に決まるため、データモジュールではなくここで足す
+    const data = { version, ...dataset.build() };
 
     const invalid = dataset.validate(data);
     if (invalid) {
@@ -454,7 +496,15 @@ async function publishDataset(dataset) {
         : null;
     const publishedBreakdown = publishedData ? dataset.breakdown(publishedData) : null;
 
-    const next = { breakdown: dataset.breakdown(data), count: dataset.count(data) };
+    // 同じ番号では公開させない。利用者アプリの更新判定は等値比較のみで、
+    // 番号を据え置くと公開しても端末に届かない（契約 §4.3。サーバーも 400 で拒否する）
+    if (published && published.version === version) {
+        showMessage(`バージョン ${version} はすでに公開されています。番号を進めてください`, 'error');
+        versionInput(dataset).focus();
+        return;
+    }
+
+    const next = { version, breakdown: dataset.breakdown(data), count: dataset.count(data) };
 
     if (!confirm(buildConfirmMessage(dataset, published, publishedBreakdown, next))) {
         return;
@@ -505,6 +555,10 @@ export function setupPublish(onDataChanged) {
     Object.values(DATASETS).forEach(dataset => {
         bindBusyButton(dataset.buttonId, () => publishDataset(dataset));
         bindBusyButton(dataset.exportButtonId, () => exportPublished(dataset));
+
+        versionInput(dataset).addEventListener('input', function () {
+            this.dataset.edited = 'true';
+        });
     });
 
     document.getElementById('clearTokenBtn').addEventListener('click', clearToken);
