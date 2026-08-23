@@ -478,8 +478,12 @@ async function publishDataset(dataset) {
         return;
     }
 
-    // version は公開時に決まるため、データモジュールではなくここで足す
-    const data = { version, ...dataset.build() };
+    // version は公開時に決まるため、データモジュールではなくここで足す。
+    //
+    // ★ version は必ず展開の「後ろ」に置く。tiles は読み込んだ tile_manifest.json を
+    //   そのまま送るため、DownloadArea が入れた version（`yyyy-MM` 形式）が残っている。
+    //   前に置くとファイル側の値で上書きされ、画面で指定した番号が送られない。
+    const data = { ...dataset.build(), version };
 
     const invalid = dataset.validate(data);
     if (invalid) {

@@ -79,7 +79,10 @@ export function getTotal() {
 // ===== 公開用整形 =====
 
 // 整形しない。読み込んだ内容をそのまま送る（契約 §3.6）。
-// version / updatedAt は送られてもサーバーの値で上書きされる。
+//
+// 読み込んだファイルには DownloadArea が入れた version（`yyyy-MM` 形式）が残っているが、
+// 公開する version は画面の入力欄で決まる（契約 3.0 §4）。publish.js が送信直前に
+// 上書きするため、ここでは取り除かない。updatedAt はサーバーが付ける。
 export function buildPublishData() {
     return state.manifest;
 }
