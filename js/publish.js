@@ -45,6 +45,13 @@ function validateGeoJson(data) {
     return null;
 }
 
+// 公開中が0件なら、読み込み済みにはしない。公開API は保存先の読み取りに失敗しても 200 で0件を返すため、
+// 読み込み済みにすると、失敗後にもう一度「公開」を押しただけで全消去になりうる。
+function restoreGeoJson(dataModule, json) {
+    if (Array.isArray(json.features) && json.features.length === 0) dataModule.clear();
+    else dataModule.load(json);
+}
+
 function breakdownMapData(geojson) {
     const counts = {};
     (geojson.features || []).forEach(f => {
@@ -108,7 +115,7 @@ const DATASETS = {
         exportButtonId: 'exportClosureBtn',
         isLoaded: () => ClosureData.isLoaded(),
         build: () => ClosureData.buildPublishData(),
-        restore: json => ClosureData.load(json),
+        restore: json => restoreGeoJson(ClosureData, json),
         validate: validateGeoJson,
         count: countFeatures,
         breakdown: breakdownClosures,
@@ -129,7 +136,7 @@ const DATASETS = {
         exportButtonId: 'exportMapDataBtn',
         isLoaded: () => MapData.isLoaded(),
         build: () => MapData.buildPublishData(),
-        restore: json => MapData.load(json),
+        restore: json => restoreGeoJson(MapData, json),
         validate: validateGeoJson,
         count: countFeatures,
         breakdown: breakdownMapData,

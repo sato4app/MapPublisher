@@ -51,6 +51,13 @@ export const EXCLUDED_TYPE_LABELS = {
 // 本当に確認してほしい除外（エリア・通行止め地点の混入など）が埋もれる。
 export const SILENT_EXCLUDED_TYPES = ['point'];
 
+// ===== 読み込むファイルの名前 =====
+// 0件のファイルは中身からデータセットを見分けられず、取り違えると別のデータを全消去しうる。
+// そのため0件のときだけ、名前の先頭がこれに一致するものに限って読み込む
+// （MapEditor の出力名と、本アプリの「公開済みデータを出力」の出力名）。
+export const MAPDATA_FILE_PREFIXES = ['MapGPS-', 'MapData-'];
+export const CLOSURE_FILE_PREFIXES = ['Closure-'];
+
 // ===== ハイキングマップデータ（mapdata）の表示 =====
 // minoh-hiking のマーカー設定の既定値（config.js の MARKER_TYPES）に合わせ、
 // 公開後にユーザーが見る地図との見え方を揃える。

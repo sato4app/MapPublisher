@@ -14,6 +14,7 @@ import { roundCoord, escapeHtml, pickText } from './utils.js';
 const state = {
     map: null,
     layer: null,
+    loaded: false,                // 読み込み済みか（0件も読み込み済みになりうるため件数では判定しない）
     features: [],                 // 公開対象の Feature（読み込んだ生の形のまま保持）
     counts: {},                   // type -> 件数
     excluded: {}                  // 公開対象外の type -> 件数
@@ -49,6 +50,12 @@ export function load(json) {
         }
     });
 
+    // 中身があるのに公開対象が無ければ別のファイル。0件として受け付けると全消去の公開になってしまう
+    if (features.length === 0 && json.features.length > 0) {
+        throw new Error('ハイキングマップデータのファイルではありません（公開対象のデータがありません）');
+    }
+
+    state.loaded = true;
     state.features = features;
     state.counts = counts;
     state.excluded = excluded;
@@ -58,6 +65,7 @@ export function load(json) {
 }
 
 export function clear() {
+    state.loaded = false;
     state.features = [];
     state.counts = {};
     state.excluded = {};
@@ -65,7 +73,7 @@ export function clear() {
 }
 
 export function isLoaded() {
-    return state.features.length > 0;
+    return state.loaded;
 }
 
 // ===== 件数 =====

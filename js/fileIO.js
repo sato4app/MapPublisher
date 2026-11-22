@@ -6,6 +6,7 @@
 // （公開APIから取ってくる処理と同じ場所にあるほうが追いやすいため）。
 // ここには保存の作法だけを置く。
 
+import { MAPDATA_FILE_PREFIXES, CLOSURE_FILE_PREFIXES } from './constants.js';
 import { showMessage } from './message.js';
 import { saveBlobAsFile } from './utils.js';
 import * as MapData from './mapData.js';
@@ -20,6 +21,19 @@ async function readJson(file) {
     } catch {
         throw new Error('JSONとして読み込めません');
     }
+}
+
+// 0件のファイルは名前でデータセットを確かめる（constants.js の *_FILE_PREFIXES を参照）
+function checkEmptyFileName(json, fileName, prefixes) {
+    if (!json || !Array.isArray(json.features) || json.features.length > 0) return;
+    if (!prefixes.some(prefix => fileName.startsWith(prefix))) {
+        throw new Error(`0件のファイルは、名前が ${prefixes.join(' か ')} で始まるものだけ読み込めます`);
+    }
+}
+
+function showEmptyLoaded(fileName, label) {
+    showMessage(`${fileName}: 0件のデータを読み込みました\n`
+        + `公開すると、公開中の${label}がすべて地図から消えます`, 'warning');
 }
 
 // ファイル選択のイベントを配線する。読み込み後に onLoaded を呼ぶ。
@@ -44,10 +58,11 @@ function bindFileInput(inputId, handler, onLoaded) {
 
 export function setupMapDataLoad(onLoaded) {
     bindFileInput('mapDataFileInput', (json, fileName) => {
+        checkEmptyFileName(json, fileName, MAPDATA_FILE_PREFIXES);
         const result = MapData.load(json);
 
         if (result.total === 0) {
-            showMessage(`${fileName}: 公開対象のデータが見つかりませんでした`, 'warning');
+            showEmptyLoaded(fileName, 'ハイキングマップデータ');
             return;
         }
 
@@ -61,10 +76,11 @@ export function setupMapDataLoad(onLoaded) {
 
 export function setupClosureLoad(onLoaded) {
     bindFileInput('closureFileInput', (json, fileName) => {
+        checkEmptyFileName(json, fileName, CLOSURE_FILE_PREFIXES);
         const result = ClosureData.load(json);
 
         if (result.total === 0) {
-            showMessage(`${fileName}: 通行止め・通行困難地点が見つかりませんでした`, 'warning');
+            showEmptyLoaded(fileName, '通行止め・通行困難地点');
             return;
         }
 

@@ -12,6 +12,7 @@ import { roundCoord, escapeHtml, getDateIso } from './utils.js';
 const state = {
     map: null,
     layer: null,
+    loaded: false,       // 読み込み済みか（0件＝全解除も読み込み済みのため件数では判定しない）
     features: [],
     normalizedCount: 0   // 読み込み時に kind を既定値へ寄せた件数
 };
@@ -22,13 +23,15 @@ export function init(map) {
 
 // ===== 読み込み =====
 
-// 公開ストアから取得した geojson には properties.type が無いことがあるため、
-// type では絞り込まず Point 地物をすべて取り込む。
-function isImportable(feature) {
-    return !!feature
-        && !!feature.geometry
-        && feature.geometry.type === 'Point'
-        && Array.isArray(feature.geometry.coordinates);
+// 通行止め・通行困難地点の Feature か。
+// 公開ストアの古い geojson には properties.type が無いことがあるため、その場合は
+// 通行止め固有の項目（kind、旧形式の status）の有無で見分ける。
+function isClosure(feature) {
+    if (!feature || !feature.geometry || feature.geometry.type !== 'Point'
+        || !Array.isArray(feature.geometry.coordinates) || !feature.properties) return false;
+
+    const p = feature.properties;
+    return p.type === 'closure' || (!p.type && ('kind' in p || 'status' in p));
 }
 
 // 読み込みは置換方式（ハイキングマップデータと同じ理由。mapData.js の load を参照）
@@ -37,16 +40,18 @@ export function load(json) {
         throw new Error('FeatureCollection 形式の geojson ではありません');
     }
 
+    // 1件でも対象外があればファイルごと受け付けない。一部だけを取り込むと、
+    // 別のファイルの地点が通行止めになったり、地点が黙って減ったまま公開できたりするため。
+    const invalidCount = json.features.filter(f => !isClosure(f)).length;
+    if (invalidCount > 0) {
+        throw new Error(`通行止め・通行困難地点のファイルではありません（対象外のデータが${invalidCount}件あります）`);
+    }
+
     const features = [];
     let normalized = 0;
-    let skipped = 0;
 
     json.features.forEach(f => {
-        if (!isImportable(f)) {
-            skipped++;
-            return;
-        }
-        const p = f.properties || (f.properties = {});
+        const p = f.properties;
         // 公開スキーマの kind は closed / difficult のみ。
         // 未選択・不正値は既定値へ寄せ、件数を呼び出し側へ返して気づけるようにする。
         if (p.kind !== 'closed' && p.kind !== 'difficult') {
@@ -58,21 +63,23 @@ export function load(json) {
         features.push(f);
     });
 
+    state.loaded = true;
     state.features = features;
     state.normalizedCount = normalized;
 
     redraw();
-    return { total: features.length, normalized, skipped };
+    return { total: features.length, normalized };
 }
 
 export function clear() {
+    state.loaded = false;
     state.features = [];
     state.normalizedCount = 0;
     redraw();
 }
 
 export function isLoaded() {
-    return state.features.length > 0;
+    return state.loaded;
 }
 
 // ===== 件数 =====
