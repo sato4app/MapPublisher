@@ -60,6 +60,9 @@ export const MAPDATA_STYLES = {
     route: { color: '#007d00', weight: 3, opacity: 0.85 }
 };
 
+// 地点のポップアップの最大高さ（px）。縮小表示で多数の地点が重なったときは中をスクロールする
+export const MAPDATA_POPUP_MAX_HEIGHT = 240;
+
 // 件数表示のラベル（公開スキーマの type 順に並べる）
 export const MAPDATA_TYPE_LABELS = {
     'ポイントGPS': 'ポイント',

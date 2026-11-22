@@ -5,10 +5,10 @@
 // 本アプリは編集を行わない（位置・属性の変更は MapEditor 側の役割）。
 
 import {
-    MAPDATA_TYPES, MAPDATA_STYLES, MAPDATA_TYPE_LABELS,
+    MAPDATA_TYPES, MAPDATA_STYLES, MAPDATA_TYPE_LABELS, MAPDATA_POPUP_MAX_HEIGHT,
     EXCLUDED_TYPE_LABELS, SILENT_EXCLUDED_TYPES
 } from './constants.js';
-import { createPointMarker } from './render.js';
+import { createPointMarker, markerHtml } from './render.js';
 import { roundCoord, escapeHtml, pickText } from './utils.js';
 
 const state = {
@@ -122,6 +122,55 @@ function popupHtml(feature) {
     ].join('<br>');
 }
 
+// 地点が1つならその内容、重なっていれば種別のマーカーを添えて並べる
+function pointsPopupHtml(points) {
+    if (points.length === 1) return popupHtml(points[0].feature);
+
+    return points.map(({ feature }) => {
+        const style = MAPDATA_STYLES[feature.properties.type];
+        return `<div class="popup-point">${markerHtml(style, style.size)}`
+            + `<div>${popupHtml(feature)}</div></div>`;
+    }).join('');
+}
+
+// 押した位置にある地点（下に隠れたものを含む）を、押した位置に近い順で返す。
+// 当たり判定は各マーカーの要素そのもの。座標から計算し直すと見た目の当たり領域とずれるため。
+function findPointsAt(event, points) {
+    const { clientX, clientY } = event.originalEvent;
+    const elements = new Set(document.elementsFromPoint(clientX, clientY));
+    const pressed = state.map.mouseEventToContainerPoint(event.originalEvent);
+    const distance = ({ marker }) =>
+        state.map.latLngToContainerPoint(marker.getLatLng()).distanceTo(pressed);
+
+    return points
+        // 押されたマーカー自身は、端数の丸めで要素の外と判定されても必ず含める
+        .filter(({ marker }) => marker === event.target || elements.has(marker.getElement()))
+        .sort((a, b) => distance(a) - distance(b));
+}
+
+// 地点のポップアップ。bindPopup では最前面のマーカーしか開けないため、レイヤーで1つを共用する。
+function bindPointsPopup(layer, points) {
+    const popup = L.popup({ maxHeight: MAPDATA_POPUP_MAX_HEIGHT });
+    // 非表示・消去・読み直しでマーカーと一緒に消す
+    layer.on('remove', () => popup.remove());
+
+    points.forEach(({ marker }) => {
+        // 地図の preclick へ伝えない（先に閉じられると、再クリックで閉じる判定ができない）
+        marker.on('preclick', L.DomEvent.stopPropagation);
+        marker.on('click', event => {
+            const hits = findPointsAt(event, points);
+            const html = pointsPopupHtml(hits);
+            const latlng = hits[0].marker.getLatLng();
+            const isShown = popup.isOpen()
+                && popup.getContent() === html
+                && popup.getLatLng().equals(latlng);
+
+            popup.remove();
+            if (!isShown) popup.setContent(html).setLatLng(latlng).openOn(state.map);
+        });
+    });
+}
+
 function redraw() {
     if (!state.map) return;
 
@@ -132,6 +181,7 @@ function redraw() {
     if (state.features.length === 0) return;
 
     const layer = L.layerGroup();
+    const points = [];
 
     state.features.forEach(feature => {
         const type = feature.properties.type;
@@ -161,9 +211,10 @@ function redraw() {
             hitArea: true,
             box: Math.max(style.size, 16)
         });
-        marker.bindPopup(popupHtml(feature));
+        points.push({ marker, feature });
         layer.addLayer(marker);
     });
+    bindPointsPopup(layer, points);
 
     state.layer = layer;
     if (document.getElementById('mapDataVisible').checked) {

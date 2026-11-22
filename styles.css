@@ -391,6 +391,27 @@ input[type="file"] {
     overflow-wrap: break-word;
 }
 
+/* 重なった地点を並べたポップアップ。左に種別のマーカーを添え、地点ごとに罫線で区切る */
+.popup-point {
+    display: flex;
+    gap: 6px;
+}
+
+.popup-point + .popup-point {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid #ddd;
+}
+
+.popup-point > svg {
+    flex-shrink: 0;
+    margin-top: 3px;
+}
+
+.popup-point > div {
+    min-width: 0;
+}
+
 /* ===== トーストメッセージ ===== */
 .toast-message {
     position: fixed;
