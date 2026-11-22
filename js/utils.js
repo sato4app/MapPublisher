@@ -30,6 +30,15 @@ export function roundCoord(value) {
     return value;
 }
 
+// 指定した項目のうち値のあるものだけを、前後の空白を除いた文字列で返す（任意項目の表示・出力で使用）
+export function pickText(source, keys) {
+    return Object.fromEntries(
+        keys
+            .map(key => [key, String(source[key] ?? '').trim()])
+            .filter(([, text]) => text !== '')
+    );
+}
+
 // HTMLエスケープ（ポップアップに地点名・備考を埋め込む際に使用）
 export function escapeHtml(value) {
     return String(value ?? '')

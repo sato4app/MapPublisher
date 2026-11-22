@@ -9,7 +9,7 @@ import {
     EXCLUDED_TYPE_LABELS, SILENT_EXCLUDED_TYPES
 } from './constants.js';
 import { createPointMarker } from './render.js';
-import { roundCoord, escapeHtml } from './utils.js';
+import { roundCoord, escapeHtml, pickText } from './utils.js';
 
 const state = {
     map: null,
@@ -108,16 +108,18 @@ function routeLatLngs(feature) {
         .map(c => [c[1], c[0]]);
 }
 
+// 見出し（太字）の下に、公開される名称・英語名を値のあるものだけ並べる。
+// 見出しはスポットが名称、ルートとポイントGPS は id（後者は現地の標識と対応する）。
 function popupHtml(feature) {
     const p = feature.properties || {};
-    if (p.type === 'route') {
-        return `<strong>${escapeHtml(p.id || '')}</strong>`;
-    }
-    if (p.type === 'spot') {
-        return `<strong>${escapeHtml(p.name || '')}</strong>`;
-    }
-    // ポイントGPS は現地の標識と対応する id を併記する
-    return `<strong>${escapeHtml(p.id || '')}</strong><br>${escapeHtml(p.name || '')}`;
+    const isSpot = p.type === 'spot';
+    const heading = isSpot ? p.name : p.id;
+    const details = pickText(p, isSpot ? ['englishName'] : ['name', 'englishName']);
+
+    return [
+        `<strong>${escapeHtml(heading || '')}</strong>`,
+        ...Object.values(details).map(escapeHtml)
+    ].join('<br>');
 }
 
 function redraw() {
@@ -194,7 +196,7 @@ function toPublishFeature(feature) {
     if (type === 'ポイントGPS') {
         // id は現地の標識と対応する利用者向けの識別子のため残す。
         // pointId は全件で id と同値のため出力しない。
-        const props = { type, id: p.id || '', name: p.name || '' };
+        const props = { type, id: p.id || '', name: p.name || '', ...pickText(p, ['englishName']) };
         if (p.description != null && String(p.description).trim() !== '') {
             props.description = p.description;
         }
@@ -205,18 +207,20 @@ function toPublishFeature(feature) {
         // id / source / description は出力しない（どこからも参照されず、値も定数のため）
         return {
             type: 'Feature',
-            properties: { type, name: p.name || '' },
+            properties: { type, name: p.name || '', ...pickText(p, ['englishName']) },
             geometry: roundGeometry(feature.geometry)
         };
     }
 
     if (type === 'route') {
         // startPoint / endPoint（ID参照）は出力しない。端点は座標で渡す。
+        // ルートの名称は任意のため、英語名と同じく値があるときのみ出力する。
         return {
             type: 'Feature',
             properties: {
                 type,
                 id: p.id || '',
+                ...pickText(p, ['name', 'englishName']),
                 startPointGPS: Array.isArray(p.startPointGPS) ? roundCoord(p.startPointGPS) : null,
                 endPointGPS: Array.isArray(p.endPointGPS) ? roundCoord(p.endPointGPS) : null
             },

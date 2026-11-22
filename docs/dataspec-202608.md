@@ -1,7 +1,7 @@
 # MapPublisher データ仕様書（入力 GeoJSON と公開スキーマへの整形）
 
-**バージョン:** 2.9
-**最終更新日:** 2026年9月25日
+**バージョン:** 2.10
+**最終更新日:** 2026年11月22日
 **対象アプリ:** MapPublisher
 **関連:**
 [機能仕様 `funcspec-202608.md`](funcspec-202608.md) /
@@ -121,12 +121,16 @@ MapEditor が出力する統合 GeoJSON。編集用の情報を含む。
 | type | プロパティ | 公開 | 備考 |
 |---|---|:---:|---|
 | `ポイントGPS` | `type` / `id` / `name` | ○ | `id` は現地の標識と対応する（例 `B-01`） |
+| | `englishName` | △ | 英語名。**値があるときのみ**公開する（§3.5） |
 | | `pointId` | × | 全件で `id` と同値 |
 | | `description` | △ | **値があるときのみ**公開する（`null` は出力しない） |
 | `spot` | `type` / `name` | ○ | |
+| | `englishName` | △ | 英語名。**値があるときのみ**公開する（§3.5） |
 | | `id` | × | どこからも参照されていない（§3.4） |
 | | `source` / `description` | × | 全件が定数（`image_transformed` / `スポット（GPS変換済）`） |
 | `route` | `type` / `id` | ○ | `id` は `route_{開始}_to_{終了}` 形式 |
+| | `name` | △ | ルート名。**値があるときのみ**公開する（§3.5） |
+| | `englishName` | △ | 英語名。**値があるときのみ**公開する（§3.5） |
 | | `startPointGPS` / `endPointGPS` | ○ | 端点の座標。`null` のことがある |
 | | `startPoint` / `endPoint` | × | ID 参照。端点座標があるため不要（§3.4） |
 
@@ -142,6 +146,16 @@ MapEditor が出力する統合 GeoJSON。編集用の情報を含む。
 
 > spot の `id` を出力しないため、**spot の名称が重複していても問題にならない**。
 > 公開API の `id` 一意検証は `id` を持たない Feature をスキップする。
+
+### 3.5 英語名（`englishName`）とルート名（route の `name`）
+
+どちらも任意項目で、MapEditor で設定する。
+
+- 前後の空白を除いて公開する。文字列中の改行は残す。
+- `null`・空文字・空白のみのときは、**キーごと出力しない**。
+  利用者アプリは、キーが無い場合（項目追加前に公開されたデータを含む）に備える必要がある。
+- route の `name` は**値をそのまま公開する**。GeoReferencer が付ける仮の表示名（`{開始} ～ {終了}`）は
+  MapEditor が取り込み時に除くため、本アプリでは判定しない。
 
 ---
 
@@ -320,9 +334,9 @@ ID による重複検出も不要になる。
 
 | type | 出力するプロパティ（この順） |
 |---|---|
-| `ポイントGPS` | `type` → `id` → `name` →（`description`） |
-| `spot` | `type` → `name` |
-| `route` | `type` → `id` → `startPointGPS` → `endPointGPS` |
+| `ポイントGPS` | `type` → `id` → `name` →（`englishName`）→（`description`） |
+| `spot` | `type` → `name` →（`englishName`） |
+| `route` | `type` → `id` →（`name`）→（`englishName`）→ `startPointGPS` → `endPointGPS` |
 | `closure` | `type` → `id` → `name` → `kind` →（`reason`）→（`note`）→（`relatedRoute`）→（`reopenDate`）→ `updatedAt` |
 
 括弧付きは**値があるときのみ**出力する。
@@ -340,12 +354,15 @@ geometry の座標、および `startPointGPS` / `endPointGPS` を
   "features": [
     {
       "type": "Feature",
-      "properties": { "type": "ポイントGPS", "id": "B-01", "name": "聖天展望台" },
+      "properties": {
+        "type": "ポイントGPS", "id": "B-01", "name": "聖天展望台",
+        "englishName": "Shoten Observatory"
+      },
       "geometry": { "type": "Point", "coordinates": [135.47258, 34.839, 184.6] }
     },
     {
       "type": "Feature",
-      "properties": { "type": "spot", "name": "滝道32鉄橋" },
+      "properties": { "type": "spot", "name": "滝道32鉄橋", "englishName": "Takimichi Bridge 32" },
       "geometry": { "type": "Point", "coordinates": [135.47102, 34.84955, 162.3] }
     },
     {
@@ -353,6 +370,8 @@ geometry の座標、および `startPointGPS` / `endPointGPS` を
       "properties": {
         "type": "route",
         "id": "route_H-04_to_H-11",
+        "name": "ルート名の例",
+        "englishName": "Example Route",
         "startPointGPS": [135.4713, 34.87451, 534],
         "endPointGPS": [135.47341, 34.86829, 552.9]
       },
@@ -422,6 +441,7 @@ geometry の座標、および `startPointGPS` / `endPointGPS` を
 
 | 日付 | バージョン | 内容 |
 |------|-----------|------|
+| 2026-11-22 | 2.10 | 公開するプロパティに、ポイントGPS・ルート・スポットの `englishName`（英語名）とルートの `name`（ルート名）を追加。いずれも任意で、値があるときのみ出力する（§3.3・§3.5・§7.2・§7.4） |
 | 2026-09-25 | 2.9 | 通行止め・通行困難地点の `reopenDate`（解除予定日・`YYYY-MM-DD`・任意。公開API 契約 3.1）を公開するプロパティに追加（§4.2・§7.2） |
 | 2026-08-25 | 2.8 | タイル一覧を地図に描くようになったため、**ズームレベルの読み取り規則**を追加（§5.4） |
 | 2026-08-23 | 2.7 | DownloadArea が `tile_manifest.json` に `version` を出力しなくなったことを反映（§5.1）。古いファイルに残る `version` の扱いを注記 |
